@@ -1,0 +1,21 @@
+# Root .gitignore
+node_modules/
+dist/
+build/
+.next/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+.local
+.gemini/
+*.log
+.vscode/
+.idea/
+frontend/node_modules/
+frontend/build/
+backend/venv/
+backend/__pycache__/
