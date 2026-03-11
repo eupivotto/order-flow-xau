@@ -43,6 +43,10 @@ interface MarketData {
 // App
 // ---------------------------------------------------------------------------
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'localhost:8000';
+const WS_URL = `ws://${API_BASE_URL}/ws`;
+const HTTP_URL = `http://${API_BASE_URL}/api`;
+
 function App() {
   const [connected, setConnected] = useState(false);
   const [data, setData] = useState<MarketData | null>(null);
@@ -59,7 +63,7 @@ function App() {
 
   // Carga inicial de snapshots históricos via REST
   useEffect(() => {
-    fetch('http://localhost:8000/api/heatmap')
+    fetch(`${HTTP_URL}/heatmap`)
       .then(r => r.json())
       .then(resp => {
         if (resp.snapshots?.length) {
@@ -75,7 +79,7 @@ function App() {
         }
       });
       
-    fetch('http://localhost:8000/api/footprint')
+    fetch(`${HTTP_URL}/footprint`)
       .then(r => r.json())
       .then(resp => {
         if (resp.candles) {
@@ -84,7 +88,7 @@ function App() {
       });
 
     // Pré-carrega histórico de sinais
-    fetch('http://localhost:8000/api/signals')
+    fetch(`${HTTP_URL}/signals`)
       .then(r => r.json())
       .then(resp => {
         if (resp.signals?.length) {
@@ -96,7 +100,7 @@ function App() {
 
   // WebSocket principal: recebe market_data e gera snapshots em tempo real
   useEffect(() => {
-    const ws = new WebSocket('ws://localhost:8000/ws');
+    const ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
       setConnected(true);
@@ -321,7 +325,7 @@ function App() {
             className="session-reset-btn"
             onClick={() => {
                 if(window.confirm("Deseja resetar a sessão de viés agora?")) {
-                    fetch('http://localhost:8000/api/session/reset', { method: 'POST' });
+                    fetch(`${HTTP_URL}/session/reset`, { method: 'POST' });
                 }
             }}
         >
