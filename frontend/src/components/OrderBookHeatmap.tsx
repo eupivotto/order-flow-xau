@@ -148,13 +148,17 @@ const OrderBookHeatmap: React.FC<Props> = ({
 
     if (globalMin === Infinity) return;
 
-    // Centraliza no mid mais recente com padding reduzido (zoom visual maior)
+    // Centraliza no mid mais recente
     const lastMid = window[window.length - 1].mid;
+
+    // Janela de preços mais estável:
+    // Garante no mínimo $15 de range longitudinal para ver o "macro" da liquidez
+    const MIN_RANGE = 15;
+    const actualRange = globalMax - globalMin;
+    const priceRange = Math.max(actualRange, MIN_RANGE);
     
-    // Deixamos a janela mais "apertada" ao redor do preço para não ficar fino demais
-    const priceRange = Math.max((globalMax - globalMin) * 1.5, 5); 
-    const visMin = lastMid - priceRange / 2;
-    const visMax = lastMid + priceRange / 2;
+    const visMin = lastMid - priceRange * 0.6; // Mostramos um pouco mais pra baixo (bids) por padrão
+    const visMax = lastMid + priceRange * 0.4;
     const visRange = visMax - visMin;
 
     const priceToY = (p: number) =>
