@@ -170,7 +170,7 @@ function App() {
     ws.onclose = () => setConnected(false);
 
     return () => ws.close();
-  }, []);
+  }, [activeTab]);
 
   // ---------------------------------------------------------------------------
   // UI helpers

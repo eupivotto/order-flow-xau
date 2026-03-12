@@ -32,6 +32,7 @@ interface Props {
 const FootprintChart: React.FC<Props> = ({ candles }) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const lastVolume = candles.at(-1)?.volume;
   // Auto-scroll to the rightmost (newest) candle and center the vertical scroll
   useEffect(() => {
     if (containerRef.current) {
@@ -65,7 +66,7 @@ const FootprintChart: React.FC<Props> = ({ candles }) => {
         }
       }
     }
-  }, [candles.length, candles.at(-1)?.volume]);
+  }, [candles, lastVolume]);
 
   if (!candles || candles.length === 0) {
     return (
