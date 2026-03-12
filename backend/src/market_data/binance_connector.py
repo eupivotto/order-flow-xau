@@ -464,10 +464,10 @@ class BinanceXAUConnector:
         top_bids = sorted(
             ((float(p), q) for p, q in self._bids.items()),
             reverse=True
-        )[:10]
+        )[:100]
         top_asks = sorted(
             ((float(p), q) for p, q in self._asks.items())
-        )[:10]
+        )[:100]
 
         best_bid = top_bids[0][0] if top_bids else 0.0
         best_ask = top_asks[0][0] if top_asks else 0.0
