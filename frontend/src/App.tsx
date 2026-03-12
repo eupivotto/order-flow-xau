@@ -44,8 +44,12 @@ interface MarketData {
 // ---------------------------------------------------------------------------
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'localhost:8000';
-const WS_URL = `ws://${API_BASE_URL}/ws`;
-const HTTP_URL = `http://${API_BASE_URL}/api`;
+const IS_PROD = window.location.protocol === 'https:';
+const WS_PROTOCOL = IS_PROD ? 'wss' : 'ws';
+const HTTP_PROTOCOL = IS_PROD ? 'https' : 'http';
+
+const WS_URL = `${WS_PROTOCOL}://${API_BASE_URL}/ws`;
+const HTTP_URL = `${HTTP_PROTOCOL}://${API_BASE_URL}/api`;
 
 function App() {
   const [connected, setConnected] = useState(false);
@@ -454,32 +458,29 @@ function App() {
               )}
 
 
-              {/* Mini Book (top 5 bids/asks) */}
-              {data.top_bids && data.top_asks && (
-                <div className="mini-book">
-                  <div className="mini-book-col">
-                    <div className="mini-book-header asks-header">ASKS</div>
-                    {[...(data.top_asks ?? [])].reverse().map((l, i) => (
-                      <div key={i} className="mini-book-row ask-row">
-                        <span className="book-qty">{l.qty.toFixed(4)}</span>
-                        <span className="book-price ask-price">${l.price.toFixed(2)}</span>
-                      </div>
-                    ))}
+              {/* Painel de Cards Analíticos (Movidos da Sidebar) */}
+              <div className="main-cards-row">
+                {renderStopRadar()}
+                {renderSessionBias()}
+                
+                {/* Top walls */}
+                {data.wall_levels && data.wall_levels.length > 0 && (
+                  <div className="walls-panel">
+                    <h3>Walls Detectados</h3>
+                    <div className="walls-list">
+                      {data.wall_levels.slice(0, 5).map((w, i) => (
+                        <div key={i} className="wall-row">
+                          <span className={`wall-side ${w.side === 'bid' ? 'green' : 'red'}`}>
+                            {w.side.toUpperCase()}
+                          </span>
+                          <span className="wall-price">${w.price.toFixed(2)}</span>
+                          <span className="wall-qty">{w.qty.toFixed(3)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="mini-book-sep">
-                    <div className="sep-mid">${data.mid.toFixed(2)}</div>
-                  </div>
-                  <div className="mini-book-col">
-                    <div className="mini-book-header bids-header">BIDS</div>
-                    {(data.top_bids ?? []).map((l, i) => (
-                      <div key={i} className="mini-book-row bid-row">
-                        <span className="book-price bid-price">${l.price.toFixed(2)}</span>
-                        <span className="book-qty">{l.qty.toFixed(4)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
             </>
           ) : (
             <div className="loading">
@@ -541,33 +542,10 @@ function App() {
               <span className="value accent">{data?.walls ?? 0}</span>
             </div>
           </div>
-
-          {/* Viés de Sessão (Weekend / Pre-Market Bias) */}
-          {renderSessionBias()}
-
-          {/* Radar de Stops */}
-          {renderStopRadar()}
-
-          {/* Trade Tape (Time & Sales) */}
+          {/* Trade Tape (Time & Sales) agora sobe para o topo */}
           {data?.recent_trades && data.recent_trades.length > 0 && (
             <div className="tape-wrapper">
               <TradeTape trades={data.recent_trades} />
-            </div>
-          )}
-
-          {/* Top walls */}
-          {data?.wall_levels && data.wall_levels.length > 0 && (
-            <div className="walls-panel">
-              <h3>Walls Detectados</h3>
-              {data.wall_levels.slice(0, 5).map((w, i) => (
-                <div key={i} className="wall-row">
-                  <span className={`wall-side ${w.side === 'bid' ? 'green' : 'red'}`}>
-                    {w.side.toUpperCase()}
-                  </span>
-                  <span className="wall-price">${w.price.toFixed(2)}</span>
-                  <span className="wall-qty">{w.qty.toFixed(3)}</span>
-                </div>
-              ))}
             </div>
           )}
         </div>
