@@ -68,7 +68,7 @@ function App() {
   // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  const playBeep = (freq: number, duration: number, type: 'sine'|'square'|'sawtooth'|'triangle' = 'sine') => {
+  const playBeep = useCallback((freq: number, duration: number, type: 'sine'|'square'|'sawtooth'|'triangle' = 'sine') => {
     if (!soundEnabled) return;
     try {
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -84,7 +84,7 @@ function App() {
       osc.start();
       osc.stop(ctx.currentTime + duration);
     } catch (e) { console.error("Erro ao tocar som", e); }
-  };
+  }, [soundEnabled]);
 
   // Ref para acumular snapshots sem forçar render a cada mensagem
   const snapAccumRef = useRef<HeatmapSnapshot[]>([]);
@@ -200,7 +200,7 @@ function App() {
     ws.onclose = () => setConnected(false);
 
     return () => ws.close();
-  }, [activeTab]);
+  }, [activeTab, playBeep]);
 
   // ---------------------------------------------------------------------------
   // UI helpers
