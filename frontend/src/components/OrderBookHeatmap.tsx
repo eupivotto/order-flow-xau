@@ -365,7 +365,6 @@ const OrderBookHeatmap: React.FC<Props> = ({
     const resSeconds = resolution === '1s' ? 1 : resolution === '10s' ? 10 : 60;
     const maxCols = 120;
     
-    const window = snapshots.slice(-(maxCols * resSeconds)); // Pega dados brutos suficientes
     
     // Lógica de agregação idêntica ao draw() para o tooltip
     const aggregatedTooltip: HeatmapSnapshot[] = [];
