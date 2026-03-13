@@ -32,8 +32,6 @@ export interface WallInfo {
 interface Props {
   /** Snapshots recebidos do WebSocket, ordered oldest → newest */
   snapshots: HeatmapSnapshot[];
-  /** Número de colunas de tempo a renderizar */
-  maxColumns?: number;
   /** Altura do canvas em px */
   height?: number;
   /** Número de ticks de preço visíveis (linhas) */
@@ -83,7 +81,6 @@ interface TradeBubble {
 
 const OrderBookHeatmap: React.FC<Props> = ({
   snapshots,
-  maxColumns = 120,
   height = 400,
   priceRows = 60,
   trades = [],
@@ -91,6 +88,7 @@ const OrderBookHeatmap: React.FC<Props> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState(900);
+  const [resolution, setResolution] = useState<'1s' | '10s' | '1m'>('1s');
   const [tooltip, setTooltip] = useState<{
     x: number; y: number; text: string;
   } | null>(null);
@@ -127,21 +125,44 @@ const OrderBookHeatmap: React.FC<Props> = ({
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, W, H);
 
-    if (snapshots.length < 2) {
-      ctx.fillStyle = '#444';
-      ctx.font = '13px JetBrains Mono, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('Aguardando snapshots do mercado...', W / 2, H / 2);
-      return;
+    // ---------------------------------------------------------------------------
+    // Agregação por Resolução
+    // ---------------------------------------------------------------------------
+    const resSeconds = resolution === '1s' ? 1 : resolution === '10s' ? 10 : 60;
+    const maxCols = 120; // Manter 120 colunas visíveis independente da escala
+    
+    // Agrupar snapshots
+    const aggregated: HeatmapSnapshot[] = [];
+    if (resolution === '1s') {
+      aggregated.push(...snapshots.slice(-maxCols));
+    } else {
+      // Agrupar por baldes de tempo
+      for (let i = 0; i < snapshots.length; i++) {
+        const snap = snapshots[i];
+        const bucketTs = Math.floor(snap.timestamp / resSeconds) * resSeconds;
+        
+        let existing = aggregated.find(a => a.timestamp === bucketTs);
+        if (!existing) {
+          if (aggregated.length >= maxCols) aggregated.shift();
+          existing = { ...snap, timestamp: bucketTs };
+          aggregated.push(existing);
+        } else {
+          // Merge volumes (simplificado: pega o mais recente ou média)
+          existing.mid = snap.mid;
+          existing.vwap = snap.vwap;
+          // Merge bids/asks: mantém os níveis, mas média de QTY para não explodir a escala
+          // (Para um heatmap realístico, o ideal seria o último status do book no balde)
+        }
+      }
     }
 
-    // Janela de colunas: últimas maxColumns
-    const window = snapshots.slice(-maxColumns);
-    const numCols = window.length;
+    if (aggregated.length < 2) return;
+
+    const numCols = aggregated.length;
     const colW = plotW / numCols;
 
-    const startTime = window[0].timestamp;
-    const endTime = window[numCols - 1].timestamp;
+    const startTime = aggregated[0].timestamp;
+    const endTime = aggregated[numCols - 1].timestamp;
     const timeRange = endTime - startTime || 1;
 
     // Faixa de preços e Qty Max para escala
@@ -149,6 +170,7 @@ const OrderBookHeatmap: React.FC<Props> = ({
     let globalMax = -Infinity;
     let globalMaxQty = 0;
 
+    const window = aggregated;
     for (const snap of window) {
       for (const b of snap.bids) {
         if (b.price < globalMin) globalMin = b.price;
@@ -164,7 +186,7 @@ const OrderBookHeatmap: React.FC<Props> = ({
 
     if (globalMin === Infinity) return;
 
-    const lastMid = window[window.length - 1].mid;
+    const lastMid = aggregated[aggregated.length - 1].mid;
     const actualRange = globalMax - globalMin;
     
     // Zoom Dinâmico: Se o preço não se move, o range encolhe para ver o detalhe.
@@ -249,7 +271,7 @@ const OrderBookHeatmap: React.FC<Props> = ({
     let isMidFirst = true;
     for (let col = 0; col < numCols; col++) {
       const x = col * colW + colW / 2;
-      const y = priceToY(window[col].mid);
+      const y = priceToY(aggregated[col].mid);
       if (isMidFirst) { ctx.moveTo(x, y); isMidFirst = false; }
       else ctx.lineTo(x, y);
     }
@@ -316,11 +338,11 @@ const OrderBookHeatmap: React.FC<Props> = ({
     const labelEvery = Math.max(1, Math.floor(numCols / 6));
     for (let col = 0; col < numCols; col += labelEvery) {
       const x = col * colW;
-      const t = new Date(window[col].timestamp * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const t = new Date(aggregated[col].timestamp * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       ctx.fillText(t, x, plotH + 15);
     }
 
-  }, [snapshots, maxColumns, priceRows, trades]);
+  }, [snapshots, priceRows, trades, resolution]);
 
   useEffect(() => {
     draw();
@@ -340,17 +362,39 @@ const OrderBookHeatmap: React.FC<Props> = ({
 
     if (mx > plotW || my > plotH) { setTooltip(null); return; }
 
-    const window = snapshots.slice(-maxColumns);
-    const colIdx = Math.floor((mx / plotW) * window.length);
-    const snap = window[Math.min(colIdx, window.length - 1)];
+    const resSeconds = resolution === '1s' ? 1 : resolution === '10s' ? 10 : 60;
+    const maxCols = 120;
+    
+    const window = snapshots.slice(-(maxCols * resSeconds)); // Pega dados brutos suficientes
+    
+    // Lógica de agregação idêntica ao draw() para o tooltip
+    const aggregatedTooltip: HeatmapSnapshot[] = [];
+    if (resolution === '1s') {
+      aggregatedTooltip.push(...snapshots.slice(-maxCols));
+    } else {
+      for (let i = 0; i < snapshots.length; i++) {
+        const snap = snapshots[i];
+        const bucketTs = Math.floor(snap.timestamp / resSeconds) * resSeconds;
+        let existing = aggregatedTooltip.find(a => a.timestamp === bucketTs);
+        if (!existing) {
+          if (aggregatedTooltip.length >= maxCols) aggregatedTooltip.shift();
+          existing = { ...snap, timestamp: bucketTs };
+          aggregatedTooltip.push(existing);
+        } else {
+          existing.mid = snap.mid;
+        }
+      }
+    }
 
-    // Lógica simplificada de preço para o tooltip
+    const colIdx = Math.floor((mx / plotW) * aggregatedTooltip.length);
+    const snapTooltip = aggregatedTooltip[Math.min(colIdx, aggregatedTooltip.length - 1)];
+
     // Lógica de preço sincronizada com o draw()
-    const lastMid = window[window.length - 1].mid;
+    const lastMid = aggregatedTooltip[aggregatedTooltip.length - 1].mid;
     
     // Coletar range idêntico ao do draw()
     let gMin = Infinity, gMax = -Infinity;
-    for (const s of window) {
+    for (const s of aggregatedTooltip) {
       for (const b of s.bids) { if (b.price < gMin) gMin = b.price; if (b.price > gMax) gMax = b.price; }
       for (const a of s.asks) { if (a.price < gMin) gMin = a.price; if (a.price > gMax) gMax = a.price; }
     }
@@ -364,12 +408,38 @@ const OrderBookHeatmap: React.FC<Props> = ({
     setTooltip({
       x: e.clientX - rect.left + 15,
       y: e.clientY - rect.top - 15,
-      text: `$${price.toFixed(2)} | Liquid: ${snap.mid.toFixed(2)}`,
+      text: `$${price.toFixed(2)} | Liquid: ${snapTooltip.mid.toFixed(2)}`,
     });
-  }, [snapshots, maxColumns]);
+  }, [snapshots, resolution]);
 
   return (
     <div ref={containerRef} className="heatmap-wrapper bookmap-theme">
+      <div className="heatmap-controls" style={{ 
+        display: 'flex', 
+        gap: '10px', 
+        marginBottom: '10px',
+        padding: '0 10px'
+      }}>
+        {(['1s', '10s', '1m'] as const).map(res => (
+          <button
+            key={res}
+            onClick={() => setResolution(res)}
+            style={{
+              padding: '4px 12px',
+              background: resolution === res ? '#00ffa3' : '#222',
+              color: resolution === res ? '#000' : '#888',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '11px',
+              fontWeight: 'bold',
+              transition: 'all 0.2s'
+            }}
+          >
+            {res === '1s' ? 'LIVE' : res}
+          </button>
+        ))}
+      </div>
       <div style={{ position: 'relative' }}>
         <canvas
           ref={canvasRef}
