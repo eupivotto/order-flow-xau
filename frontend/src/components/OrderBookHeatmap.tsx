@@ -43,27 +43,32 @@ interface Props {
 }
 
 /** 
- * Escala de cores estilo Bookmap (heatmap térmico):
- * Azul Escuro (0) -> Ciano -> Verde -> Amarelo -> Laranja -> Vermelho (1)
+ * Escala de cores estilo Bookmap (heatmap térmico) com Noise Reduction:
+ * Filtra liquidez irrelevante para focar no Smart Money.
  */
 function getBookmapColor(intensity: number, side: 'bid' | 'ask'): string {
-  const alpha = 0.15 + intensity * 0.85;
+  // Threshold de ruído: esconde tudo que for menor que 15% da maior ordem visível
+  if (intensity < 0.15) return 'transparent';
+
+  const alpha = 0.3 + intensity * 0.7;
   
   if (side === 'bid') {
-    // Escala para Bids: Azul -> Verde -> Amarelo
-    if (intensity < 0.3) return `rgba(0, 50, 200, ${alpha * 0.5})`; // Azul fraco
-    if (intensity < 0.7) return `rgba(0, 200, 100, ${alpha})`;      // Verde
-    return `rgba(255, 255, 0, ${alpha})`;                         // Amarelo (Liquidez Forte)
+    // Escala para Bids: Ciano -> Verde -> Amarelo -> Branco (Glow)
+    if (intensity < 0.4) return `rgba(0, 180, 255, ${alpha * 0.4})`; // Ciano suave
+    if (intensity < 0.7) return `rgba(0, 255, 150, ${alpha})`;       // Verde limão
+    if (intensity < 0.9) return `rgba(255, 255, 0, ${alpha})`;      // Amarelo vibrante
+    return `rgba(255, 255, 255, ${alpha})`;                        // Branco (Liquidez Extrema)
   } else {
-    // Escala para Asks: Roxo -> Laranja -> Vermelho
-    if (intensity < 0.3) return `rgba(100, 0, 150, ${alpha * 0.5})`; // Roxo fraco
-    if (intensity < 0.7) return `rgba(255, 120, 0, ${alpha})`;       // Laranja
-    return `rgba(255, 0, 0, ${alpha})`;                          // Vermelho (Baleia)
+    // Escala para Asks: Roxo -> Laranja -> Vermelho -> Magenta (Glow)
+    if (intensity < 0.4) return `rgba(150, 0, 255, ${alpha * 0.4})`; // Roxo suave
+    if (intensity < 0.7) return `rgba(255, 100, 0, ${alpha})`;       // Laranja neon
+    if (intensity < 0.9) return `rgba(255, 0, 0, ${alpha})`;         // Vermelho sangue
+    return `rgba(255, 0, 255, ${alpha})`;                           // Magenta (Paredão de Venda)
   }
 }
 
-/** Cor de wall (brilho puro) */
-const WALL_COLOR = '#ffffff';
+/** Cor de wall (brilho neon) */
+const WALL_COLOR = '#00ffff';
 
 interface TradeBubble {
   price: number;
@@ -175,45 +180,54 @@ const OrderBookHeatmap: React.FC<Props> = ({
     const rowH = Math.max(plotH / priceRows, 2);
 
     // ---------------------------------------------------------------------------
-    // 1. PINTAR HEATMAP (Liquidez)
+    // 1. PINTAR HEATMAP (Liquidez Filtrada)
     // ---------------------------------------------------------------------------
     for (let col = 0; col < numCols; col++) {
       const snap = window[col];
       const x = col * colW;
 
-      // Bids
-      for (const { price, qty } of snap.bids) {
-        if (price < visMin || price > visMax) continue;
+      // Concatenar todos os níveis para achar os Top Magnets da coluna
+      const allLevels = [...snap.bids, ...snap.asks].filter(l => l.price >= visMin && l.price <= visMax);
+      const top3Magnets = [...allLevels].sort((a,b) => b.qty - a.qty).slice(0, 2);
+
+      // Renderizar níveis
+      for (const { price, qty } of allLevels) {
         const y = priceToY(price);
         const intensity = Math.min(qty / globalMaxQty, 1);
-        ctx.fillStyle = getBookmapColor(intensity, 'bid');
-        ctx.fillRect(x, y - rowH / 2, colW + 0.5, rowH + 0.5); // +0.5 para evitar "linhas" entre células
+        const color = getBookmapColor(intensity, snap.bids.some(b => b.price === price) ? 'bid' : 'ask');
+        
+        if (color !== 'transparent') {
+          ctx.fillStyle = color;
+          // Efeito de brilho para os Top 3 níveis de liquidez
+          const isMagnet = top3Magnets.some(m => m.price === price);
+          if (isMagnet) {
+            ctx.shadowBlur = intensity * 10;
+            ctx.shadowColor = color;
+          }
+          ctx.fillRect(x, y - rowH / 2, colW + 0.5, rowH + 0.5);
+          ctx.shadowBlur = 0;
+        }
       }
 
-      // Asks
-      for (const { price, qty } of snap.asks) {
-        if (price < visMin || price > visMax) continue;
-        const y = priceToY(price);
-        const intensity = Math.min(qty / globalMaxQty, 1);
-        ctx.fillStyle = getBookmapColor(intensity, 'ask');
-        ctx.fillRect(x, y - rowH / 2, colW + 0.5, rowH + 0.5);
-      }
-
-      // Walls em destaque sólido (Bookmap style)
+      // Walls em destaque neon
       for (const wall of snap.walls ?? []) {
         if (wall.price < visMin || wall.price > visMax) continue;
         const y = priceToY(wall.price);
         ctx.fillStyle = WALL_COLOR;
-        ctx.fillRect(x, y - 0.75, colW, 1.5);
+        ctx.shadowBlur = 4;
+        ctx.shadowColor = WALL_COLOR;
+        ctx.fillRect(x, y - 1, colW, 2);
+        ctx.shadowBlur = 0;
       }
     }
 
     // ---------------------------------------------------------------------------
-    // 2. LINHAS DE PREÇO (VWAP / MID)
+    // 2. LINHAS DE PREÇO (VWAP / MID) - SUTIS
     // ---------------------------------------------------------------------------
     // VWAP
     ctx.strokeStyle = '#0fbcf9';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 2]);
     ctx.beginPath();
     let isVwapFirst = true;
     for (let col = 0; col < numCols; col++) {
@@ -228,9 +242,9 @@ const OrderBookHeatmap: React.FC<Props> = ({
     ctx.stroke();
 
     // MID PRICE
-    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([2, 4]);
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([2, 2]);
     ctx.beginPath();
     let isMidFirst = true;
     for (let col = 0; col < numCols; col++) {
@@ -243,7 +257,7 @@ const OrderBookHeatmap: React.FC<Props> = ({
     ctx.setLineDash([]);
 
     // ---------------------------------------------------------------------------
-    // 3. VOLUME BUBBLES (VOLUME DOTS)
+    // 3. VOLUME BUBBLES (VOLUME PULSE NEON)
     // ---------------------------------------------------------------------------
     for (const trade of trades) {
       if (trade.timestamp < startTime || trade.timestamp > endTime) continue;
@@ -252,24 +266,25 @@ const OrderBookHeatmap: React.FC<Props> = ({
       const x = ((trade.timestamp - startTime) / timeRange) * plotW;
       const y = priceToY(trade.price);
       
-      // Raio proporcional à raiz quadrada do volume (para escala visual melhor)
-      const radius = Math.min(Math.sqrt(trade.qty) * 2.5 + 1.5, 12);
+      const radius = Math.min(Math.log2(trade.qty + 1) * 3 + 1, 15);
       
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       
-      // Cores vibrantes de agressão
-      if (trade.side === 'BUY') {
-        ctx.fillStyle = 'rgba(0, 255, 127, 0.7)'; // SpringGreen
-        ctx.strokeStyle = '#fff';
-      } else {
-        ctx.fillStyle = 'rgba(255, 50, 50, 0.7)'; // Vibrant Red
-        ctx.strokeStyle = '#fff';
-      }
+      const isBuy = trade.side === 'BUY';
+      const bubbleColor = isBuy ? '#00ffa3' : '#ff3131';
       
-      ctx.lineWidth = 0.5;
+      ctx.fillStyle = isBuy ? 'rgba(0, 255, 163, 0.4)' : 'rgba(255, 49, 49, 0.4)';
+      ctx.shadowBlur = radius > 5 ? 8 : 4;
+      ctx.shadowColor = bubbleColor;
       ctx.fill();
-      if (trade.qty > 5) ctx.stroke(); // Borda em trades grandes
+      
+      if (trade.qty > 10) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      ctx.shadowBlur = 0;
     }
 
     // ---------------------------------------------------------------------------
