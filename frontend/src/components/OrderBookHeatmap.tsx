@@ -160,12 +160,15 @@ const OrderBookHeatmap: React.FC<Props> = ({
     if (globalMin === Infinity) return;
 
     const lastMid = window[window.length - 1].mid;
-    const MIN_RANGE = 15;
     const actualRange = globalMax - globalMin;
+    
+    // Zoom Dinâmico: Se o preço não se move, o range encolhe para ver o detalhe.
+    // Para Gold (XAU), 2.0 é um range excelente para ver micro-oscilações.
+    const MIN_RANGE = lastMid > 1000 ? 5 : 1; 
     const priceRange = Math.max(actualRange, MIN_RANGE);
     
-    const visMin = lastMid - priceRange * 0.6;
-    const visMax = lastMid + priceRange * 0.4;
+    const visMin = lastMid - priceRange / 2;
+    const visMax = lastMid + priceRange / 2;
     const visRange = visMax - visMin;
 
     const priceToY = (p: number) => plotH - ((p - visMin) / visRange) * plotH;
@@ -327,10 +330,21 @@ const OrderBookHeatmap: React.FC<Props> = ({
     const snap = window[Math.min(colIdx, window.length - 1)];
 
     // Lógica simplificada de preço para o tooltip
+    // Lógica de preço sincronizada com o draw()
     const lastMid = window[window.length - 1].mid;
-    const visMin = lastMid - 15 * 0.6; // Valor aproximado
-    const visMax = lastMid + 15 * 0.4;
-    const price = visMax - (my / plotH) * (visMax - visMin);
+    
+    // Coletar range idêntico ao do draw()
+    let gMin = Infinity, gMax = -Infinity;
+    for (const s of window) {
+      for (const b of s.bids) { if (b.price < gMin) gMin = b.price; if (b.price > gMax) gMax = b.price; }
+      for (const a of s.asks) { if (a.price < gMin) gMin = a.price; if (a.price > gMax) gMax = a.price; }
+    }
+    const MIN_RANGE = lastMid > 1000 ? 5 : 1;
+    const pRange = Math.max(gMax - gMin, MIN_RANGE);
+    const vMin = lastMid - pRange / 2;
+    const vMax = lastMid + pRange / 2;
+
+    const price = vMax - (my / plotH) * (vMax - vMin);
 
     setTooltip({
       x: e.clientX - rect.left + 15,
