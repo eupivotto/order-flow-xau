@@ -19,6 +19,7 @@ export interface HeatmapSnapshot {
   bids: BookLevel[];      // sorted desc
   asks: BookLevel[];      // sorted asc
   mid: number;
+  vwap?: number;
   walls?: WallInfo[];
 }
 
@@ -210,6 +211,25 @@ const OrderBookHeatmap: React.FC<Props> = ({
         ctx.setLineDash([]);
       }
     }
+
+    // ---------------------------------------------------------------------------
+    // Linha de VWAP (azul claro sólido)
+    // ---------------------------------------------------------------------------
+    ctx.strokeStyle = '#0fbcf9';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    let isVwapFirst = true;
+    for (let col = 0; col < numCols; col++) {
+      const snap = window[col];
+      if (snap.vwap) {
+        const x = col * colW + colW / 2;
+        const y = priceToY(snap.vwap);
+        if (isVwapFirst) { ctx.moveTo(x, y); isVwapFirst = false; }
+        else ctx.lineTo(x, y);
+      }
+    }
+    ctx.stroke();
 
     // ---------------------------------------------------------------------------
     // Linha de mid price (branco tracejado)

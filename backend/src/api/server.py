@@ -177,6 +177,7 @@ async def get_heatmap():
             {
                 "timestamp": s.timestamp,
                 "mid": s.mid,
+                "vwap": (sum(p*q for p,q in s.bids) + sum(p*q for p,q in s.asks)) / (sum(q for p,q in s.bids) + sum(q for p,q in s.asks)) if (sum(q for p,q in s.bids) + sum(q for p,q in s.asks)) > 0 else s.mid,
                 "spread": s.spread,
                 "bids": [{"price": p, "qty": q} for p, q in s.bids],
                 "asks": [{"price": p, "qty": q} for p, q in s.asks],

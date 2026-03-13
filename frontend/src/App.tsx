@@ -36,6 +36,8 @@ interface MarketData {
     buy_volume: number;
     sell_volume: number;
     delta_xau: number;
+    vwap: number;
+    cumulative_delta: number;
   };
 }
 
@@ -61,6 +63,28 @@ function App() {
   const [newSignalCount, setNewSignalCount] = useState(0);
   const [activeTab, setActiveTab] = useState<'chart' | 'heatmap' | 'signals' | 'footprint'>('heatmap');
   const [footprints, setFootprints] = useState<FootprintCandle[]>([]);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Audio refs
+  const audioCtxRef = useRef<AudioContext | null>(null);
+
+  const playBeep = (freq: number, duration: number, type: 'sine'|'square'|'sawtooth'|'triangle' = 'sine') => {
+    if (!soundEnabled) return;
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = audioCtxRef.current;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, ctx.currentTime);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (e) { console.error("Erro ao tocar som", e); }
+  };
 
   // Ref para acumular snapshots sem forçar render a cada mensagem
   const snapAccumRef = useRef<HeatmapSnapshot[]>([]);
@@ -74,6 +98,7 @@ function App() {
           const loaded: HeatmapSnapshot[] = resp.snapshots.map((s: any) => ({
             timestamp: s.timestamp,
             mid: s.mid,
+            vwap: s.vwap,
             bids: s.bids,
             asks: s.asks,
             walls: s.walls
@@ -122,6 +147,7 @@ function App() {
           const snap: HeatmapSnapshot = {
             timestamp: Date.now() / 1000,
             mid: msg.mid,
+            vwap: msg.session_stats?.vwap,
             bids: msg.top_bids.map(l => ({ price: l.price, qty: l.qty })),
             asks: msg.top_asks.map(l => ({ price: l.price, qty: l.qty })),
             walls: msg.wall_levels?.map(w => ({
@@ -159,6 +185,10 @@ function App() {
             return arr;
           });
         }
+
+        // Alertas Sonoros
+        if (msg.walls > 5) playBeep(880, 0.1, 'sine'); // Som agudo para muitos walls
+        if (msg.new_signals && msg.new_signals.length > 0) playBeep(440, 0.2, 'triangle'); // Som médio para sinal
       }
     };
 
@@ -386,6 +416,12 @@ function App() {
 
                 <div className="stats-mini">
                   <div className="mini-stat">
+                    <span className="mini-label">VWAP</span>
+                    <span className="mini-value accent blue" style={{ color: '#0fbcf9' }}>
+                      ${data.session_stats?.vwap?.toFixed(2) ?? '—'}
+                    </span>
+                  </div>
+                  <div className="mini-stat">
                     <span className="mini-label">WALLS</span>
                     <span className="mini-value accent">{data.walls}</span>
                   </div>
@@ -396,6 +432,10 @@ function App() {
                   <div className="mini-stat">
                     <span className="mini-label">ASKS</span>
                     <span className="mini-value red">{data.depth[1]}</span>
+                  </div>
+                  <div className="mini-stat sound-toggle" onClick={() => setSoundEnabled(!soundEnabled)}>
+                    <span className="mini-label">SOM</span>
+                    <span className="mini-value">{soundEnabled ? '🔔' : '🔕'}</span>
                   </div>
                 </div>
               </div>

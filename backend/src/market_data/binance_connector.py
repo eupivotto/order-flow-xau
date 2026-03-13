@@ -139,6 +139,8 @@ class SessionStats:
     buy_volume: float
     sell_volume: float
     delta_xau: float
+    cumulative_delta: float
+    vwap: float
 
 # ---------------------------------------------------------------------------
 # Classe principal
@@ -193,6 +195,8 @@ class BinanceXAUConnector:
         self._session_low: float = float("inf")
         self._session_buy_vol: float = 0.0
         self._session_sell_vol: float = 0.0
+        self._session_pv_sum: float = 0.0
+        self._session_v_sum: float = 0.0
 
         # Controle de tasks e parada
         self._running = False
@@ -213,6 +217,10 @@ class BinanceXAUConnector:
         self._session_low = current_price if current_price > 0 else float("inf")
         self._session_buy_vol = 0.0
         self._session_sell_vol = 0.0
+        
+        # VWAP: (Sum of Price * Volume) / (Sum of Volume)
+        self._session_pv_sum = 0.0
+        self._session_v_sum = 0.0
         logger.info(f"Sessão resetada! Preço base: {current_price}")
 
     # -----------------------------------------------------------------------
@@ -361,6 +369,10 @@ class BinanceXAUConnector:
             self._session_sell_vol += record.qty
         else: # Compra de Mercado
             self._session_buy_vol += record.qty
+
+        # Atualização de VWAP
+        self._session_pv_sum += (record.price * record.qty)
+        self._session_v_sum += record.qty
         
         # Atualizações normais
         self._update_footprint(record)
@@ -573,7 +585,9 @@ class BinanceXAUConnector:
             low=self._session_low,
             buy_volume=self._session_buy_vol,
             sell_volume=self._session_sell_vol,
-            delta_xau=self._session_buy_vol - self._session_sell_vol
+            delta_xau=self._session_buy_vol - self._session_sell_vol,
+            cumulative_delta=self._session_buy_vol - self._session_sell_vol,
+            vwap=self._session_pv_sum / self._session_v_sum if self._session_v_sum > 0 else 0.0
         )
 
     # -----------------------------------------------------------------------
