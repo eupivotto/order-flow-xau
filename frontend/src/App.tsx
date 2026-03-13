@@ -489,7 +489,6 @@ function App() {
               {activeTab === 'heatmap' && (
                 <OrderBookHeatmap 
                 snapshots={heatmapSnaps} 
-                maxColumns={120} 
                 height={500}
                 trades={tradesForHeatmap}
                 priceRows={60}
