@@ -64,6 +64,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'chart' | 'heatmap' | 'signals' | 'footprint'>('heatmap');
   const [footprints, setFootprints] = useState<FootprintCandle[]>([]);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [tradesForHeatmap, setTradesForHeatmap] = useState<any[]>([]);
 
   // Audio refs
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -141,6 +142,16 @@ function App() {
       if (msg.type === 'market_data') {
         setData(msg);
         setHistory(prev => [...prev.slice(-80), msg.mid]);
+
+        // Atualiza trades para o heatmap
+        if (msg.recent_trades) {
+          setTradesForHeatmap(msg.recent_trades.map(t => ({
+            price: t.price,
+            qty: t.qty,
+            side: t.side,
+            timestamp: t.timestamp
+          })));
+        }
 
         // Acumula snapshot para heatmap (a cada mensagem recebida ~1s)
         if (msg.top_bids && msg.top_asks && msg.mid) {
@@ -476,11 +487,12 @@ function App() {
               )}
 
               {activeTab === 'heatmap' && (
-                <OrderBookHeatmap
-                  snapshots={heatmapSnaps}
-                  maxColumns={120}
-                  height={380}
-                  priceRows={60}
+                <OrderBookHeatmap 
+                snapshots={heatmapSnaps} 
+                maxColumns={120} 
+                height={500}
+                trades={tradesForHeatmap}
+                priceRows={60}
                 />
               )}
 

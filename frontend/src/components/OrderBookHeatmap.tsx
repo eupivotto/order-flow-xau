@@ -38,34 +38,39 @@ interface Props {
   height?: number;
   /** Número de ticks de preço visíveis (linhas) */
   priceRows?: number;
+  /** Trades recentes para desenhar bolhas de volume */
+  trades?: TradeBubble[];
 }
 
-// ---------------------------------------------------------------------------
-// Helpers de cor
-// ---------------------------------------------------------------------------
-
-/** Intensidade 0→1 para cor de bid (verde) */
-function bidColor(intensity: number): string {
-  const alpha = 0.2 + intensity * 0.8;
-  // verde escuro → verde neon brillante
-  const r = Math.round(0 + intensity * 60);
-  const g = Math.round(120 + intensity * 135);
-  const b = Math.round(60 + intensity * 70);
-  return `rgba(${r},${g},${b},${alpha})`;
+/** 
+ * Escala de cores estilo Bookmap (heatmap térmico):
+ * Azul Escuro (0) -> Ciano -> Verde -> Amarelo -> Laranja -> Vermelho (1)
+ */
+function getBookmapColor(intensity: number, side: 'bid' | 'ask'): string {
+  const alpha = 0.15 + intensity * 0.85;
+  
+  if (side === 'bid') {
+    // Escala para Bids: Azul -> Verde -> Amarelo
+    if (intensity < 0.3) return `rgba(0, 50, 200, ${alpha * 0.5})`; // Azul fraco
+    if (intensity < 0.7) return `rgba(0, 200, 100, ${alpha})`;      // Verde
+    return `rgba(255, 255, 0, ${alpha})`;                         // Amarelo (Liquidez Forte)
+  } else {
+    // Escala para Asks: Roxo -> Laranja -> Vermelho
+    if (intensity < 0.3) return `rgba(100, 0, 150, ${alpha * 0.5})`; // Roxo fraco
+    if (intensity < 0.7) return `rgba(255, 120, 0, ${alpha})`;       // Laranja
+    return `rgba(255, 0, 0, ${alpha})`;                          // Vermelho (Baleia)
+  }
 }
 
-/** Intensidade 0→1 para cor de ask (vermelho) */
-function askColor(intensity: number): string {
-  const alpha = 0.2 + intensity * 0.8;
-  // vermelho escuro → vermelho vivo brillante
-  const r = Math.round(150 + intensity * 105);
-  const g = Math.round(20 + intensity * 50);
-  const b = Math.round(40 + intensity * 40);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
+/** Cor de wall (brilho puro) */
+const WALL_COLOR = '#ffffff';
 
-/** Cor de wall piscante (amarelo/ouro) */
-const WALL_COLOR = 'rgba(255, 200, 0, 0.9)';
+interface TradeBubble {
+  price: number;
+  qty: number;
+  side: 'BUY' | 'SELL';
+  timestamp: number;
+}
 
 // ---------------------------------------------------------------------------
 // Componente principal
@@ -76,6 +81,7 @@ const OrderBookHeatmap: React.FC<Props> = ({
   maxColumns = 120,
   height = 400,
   priceRows = 60,
+  trades = [],
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -112,15 +118,15 @@ const OrderBookHeatmap: React.FC<Props> = ({
     const plotW = W - PRICE_AXIS_W;
     const plotH = H - TIME_AXIS_H;
 
-    // Fundo
-    ctx.fillStyle = '#0a0a0a';
+    // Fundo - Estilo Dark Mode profundo
+    ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, W, H);
 
     if (snapshots.length < 2) {
       ctx.fillStyle = '#444';
       ctx.font = '13px JetBrains Mono, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('Aguardando snapshots do heatmap...', W / 2, H / 2);
+      ctx.fillText('Aguardando snapshots do mercado...', W / 2, H / 2);
       return;
     }
 
@@ -129,7 +135,11 @@ const OrderBookHeatmap: React.FC<Props> = ({
     const numCols = window.length;
     const colW = plotW / numCols;
 
-    // Faixa de preços: coletar todos para determinar min/max
+    const startTime = window[0].timestamp;
+    const endTime = window[numCols - 1].timestamp;
+    const timeRange = endTime - startTime || 1;
+
+    // Faixa de preços e Qty Max para escala
     let globalMin = Infinity;
     let globalMax = -Infinity;
     let globalMaxQty = 0;
@@ -149,32 +159,21 @@ const OrderBookHeatmap: React.FC<Props> = ({
 
     if (globalMin === Infinity) return;
 
-    // Centraliza no mid mais recente
     const lastMid = window[window.length - 1].mid;
-
-    // Janela de preços mais estável:
-    // Garante no mínimo $15 de range longitudinal para ver o "macro" da liquidez
     const MIN_RANGE = 15;
     const actualRange = globalMax - globalMin;
     const priceRange = Math.max(actualRange, MIN_RANGE);
     
-    const visMin = lastMid - priceRange * 0.6; // Mostramos um pouco mais pra baixo (bids) por padrão
+    const visMin = lastMid - priceRange * 0.6;
     const visMax = lastMid + priceRange * 0.4;
     const visRange = visMax - visMin;
 
-    const priceToY = (p: number) =>
-      plotH - ((p - visMin) / visRange) * plotH;
-
-    const rowH = Math.max(plotH / priceRows, 3); // Garante altura mínima para os blocos da matriz
-
-    // Calcular ticks de preço visíveis
-    const tickStep = Math.max(Math.ceil(visRange / priceRows / 5) * 5, 0.5); // Deixa o eixo esquerdo mostrar mais centavos
-    const firstTick = Math.ceil(visMin / tickStep) * tickStep;
+    const priceToY = (p: number) => plotH - ((p - visMin) / visRange) * plotH;
+    const rowH = Math.max(plotH / priceRows, 2);
 
     // ---------------------------------------------------------------------------
-    // Pintar células (coluna × faixa de preço)
+    // 1. PINTAR HEATMAP (Liquidez)
     // ---------------------------------------------------------------------------
-
     for (let col = 0; col < numCols; col++) {
       const snap = window[col];
       const x = col * colW;
@@ -184,8 +183,8 @@ const OrderBookHeatmap: React.FC<Props> = ({
         if (price < visMin || price > visMax) continue;
         const y = priceToY(price);
         const intensity = Math.min(qty / globalMaxQty, 1);
-        ctx.fillStyle = bidColor(intensity);
-        ctx.fillRect(x, y - rowH / 2, colW, rowH);
+        ctx.fillStyle = getBookmapColor(intensity, 'bid');
+        ctx.fillRect(x, y - rowH / 2, colW + 0.5, rowH + 0.5); // +0.5 para evitar "linhas" entre células
       }
 
       // Asks
@@ -193,31 +192,25 @@ const OrderBookHeatmap: React.FC<Props> = ({
         if (price < visMin || price > visMax) continue;
         const y = priceToY(price);
         const intensity = Math.min(qty / globalMaxQty, 1);
-        ctx.fillStyle = askColor(intensity);
-        ctx.fillRect(x, y - rowH / 2, colW, rowH);
+        ctx.fillStyle = getBookmapColor(intensity, 'ask');
+        ctx.fillRect(x, y - rowH / 2, colW + 0.5, rowH + 0.5);
       }
 
-      // Walls: marcador horizontal em amarelo
+      // Walls em destaque sólido (Bookmap style)
       for (const wall of snap.walls ?? []) {
         if (wall.price < visMin || wall.price > visMax) continue;
         const y = priceToY(wall.price);
-        ctx.strokeStyle = WALL_COLOR;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([3, 2]);
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + colW, y);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.fillStyle = WALL_COLOR;
+        ctx.fillRect(x, y - 0.75, colW, 1.5);
       }
     }
 
     // ---------------------------------------------------------------------------
-    // Linha de VWAP (azul claro sólido)
+    // 2. LINHAS DE PREÇO (VWAP / MID)
     // ---------------------------------------------------------------------------
+    // VWAP
     ctx.strokeStyle = '#0fbcf9';
     ctx.lineWidth = 1.5;
-    ctx.setLineDash([]);
     ctx.beginPath();
     let isVwapFirst = true;
     for (let col = 0; col < numCols; col++) {
@@ -231,18 +224,15 @@ const OrderBookHeatmap: React.FC<Props> = ({
     }
     ctx.stroke();
 
-    // ---------------------------------------------------------------------------
-    // Linha de mid price (branco tracejado)
-    // ---------------------------------------------------------------------------
-    ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+    // MID PRICE
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
     ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
+    ctx.setLineDash([2, 4]);
     ctx.beginPath();
     let isMidFirst = true;
     for (let col = 0; col < numCols; col++) {
-      const snap = window[col];
       const x = col * colW + colW / 2;
-      const y = priceToY(snap.mid);
+      const y = priceToY(window[col].mid);
       if (isMidFirst) { ctx.moveTo(x, y); isMidFirst = false; }
       else ctx.lineTo(x, y);
     }
@@ -250,163 +240,107 @@ const OrderBookHeatmap: React.FC<Props> = ({
     ctx.setLineDash([]);
 
     // ---------------------------------------------------------------------------
-    // Eixo de preço (direita)
+    // 3. VOLUME BUBBLES (VOLUME DOTS)
     // ---------------------------------------------------------------------------
-    ctx.fillStyle = '#111';
-    ctx.fillRect(plotW, 0, PRICE_AXIS_W, plotH);
+    for (const trade of trades) {
+      if (trade.timestamp < startTime || trade.timestamp > endTime) continue;
+      if (trade.price < visMin || trade.price > visMax) continue;
 
+      const x = ((trade.timestamp - startTime) / timeRange) * plotW;
+      const y = priceToY(trade.price);
+      
+      // Raio proporcional à raiz quadrada do volume (para escala visual melhor)
+      const radius = Math.min(Math.sqrt(trade.qty) * 2.5 + 1.5, 12);
+      
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      
+      // Cores vibrantes de agressão
+      if (trade.side === 'BUY') {
+        ctx.fillStyle = 'rgba(0, 255, 127, 0.7)'; // SpringGreen
+        ctx.strokeStyle = '#fff';
+      } else {
+        ctx.fillStyle = 'rgba(255, 50, 50, 0.7)'; // Vibrant Red
+        ctx.strokeStyle = '#fff';
+      }
+      
+      ctx.lineWidth = 0.5;
+      ctx.fill();
+      if (trade.qty > 5) ctx.stroke(); // Borda em trades grandes
+    }
+
+    // ---------------------------------------------------------------------------
+    // EIXOS E LABELS
+    // ---------------------------------------------------------------------------
+    // Preço (Direita)
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(plotW, 0, PRICE_AXIS_W, plotH);
     ctx.fillStyle = '#888';
     ctx.font = '10px JetBrains Mono, monospace';
-    ctx.textAlign = 'left';
-
+    const tickStep = Math.max(Math.ceil(visRange / priceRows / 5) * 5, 0.5);
+    const firstTick = Math.ceil(visMin / tickStep) * tickStep;
     for (let tick = firstTick; tick <= visMax; tick += tickStep) {
       const y = priceToY(tick);
       if (y < 0 || y > plotH) continue;
-      // linha de grade horizontal
-      ctx.strokeStyle = '#1a1a1a';
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(plotW, y);
-      ctx.stroke();
-      // label
-      ctx.fillStyle = Math.abs(tick - lastMid) < tickStep / 2 ? '#fff' : '#666';
-      ctx.fillText(`${tick.toFixed(0)}`, plotW + 4, y + 4);
+      ctx.fillText(tick.toFixed(0), plotW + 5, y + 4);
     }
-
-    // Mid label destacado
+    // Mid destacada
     const midY = priceToY(lastMid);
     ctx.fillStyle = '#fff';
     ctx.fillRect(plotW, midY - 9, PRICE_AXIS_W, 18);
     ctx.fillStyle = '#000';
-    ctx.font = 'bold 10px JetBrains Mono, monospace';
     ctx.fillText(lastMid.toFixed(2), plotW + 2, midY + 4);
 
-    // ---------------------------------------------------------------------------
-    // Eixo de tempo (baixo)
-    // ---------------------------------------------------------------------------
+    // Tempo (Baixo)
     ctx.fillStyle = '#0d0d0d';
     ctx.fillRect(0, plotH, plotW, TIME_AXIS_H);
     ctx.fillStyle = '#555';
-    ctx.font = '9px JetBrains Mono, monospace';
-    ctx.textAlign = 'center';
-
-    const labelEvery = Math.max(1, Math.floor(numCols / 10));
+    const labelEvery = Math.max(1, Math.floor(numCols / 6));
     for (let col = 0; col < numCols; col += labelEvery) {
-      const snap = window[col];
-      const x = col * colW + colW / 2;
-      const d = new Date(snap.timestamp * 1000);
-      const label = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      ctx.fillText(label, x, plotH + 15);
+      const x = col * colW;
+      const t = new Date(window[col].timestamp * 1000).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      ctx.fillText(t, x, plotH + 15);
     }
 
-    // ---------------------------------------------------------------------------
-    // Legenda de intensidade (canto superior esquerdo)
-    // ---------------------------------------------------------------------------
-    const lgW = 120, lgH = 12;
-    const lgX = 8, lgY = 8;
-
-    const bidGrad = ctx.createLinearGradient(lgX, 0, lgX + lgW, 0);
-    bidGrad.addColorStop(0, bidColor(0.05));
-    bidGrad.addColorStop(1, bidColor(1));
-    ctx.fillStyle = bidGrad;
-    ctx.fillRect(lgX, lgY, lgW, lgH);
-
-    const askGrad = ctx.createLinearGradient(lgX, 0, lgX + lgW, 0);
-    askGrad.addColorStop(0, askColor(0.05));
-    askGrad.addColorStop(1, askColor(1));
-    ctx.fillStyle = askGrad;
-    ctx.fillRect(lgX, lgY + lgH + 3, lgW, lgH);
-
-    ctx.fillStyle = '#777';
-    ctx.font = '9px JetBrains Mono, monospace';
-    ctx.textAlign = 'left';
-    ctx.fillText('BID', lgX + lgW + 4, lgY + 10);
-    ctx.fillText('ASK', lgX + lgW + 4, lgY + lgH + 13);
-
-    // Wall legend
-    ctx.strokeStyle = WALL_COLOR;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([3, 2]);
-    ctx.beginPath();
-    ctx.moveTo(lgX, lgY + lgH * 2 + 14);
-    ctx.lineTo(lgX + lgW, lgY + lgH * 2 + 14);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = WALL_COLOR;
-    ctx.fillText('WALL', lgX + lgW + 4, lgY + lgH * 2 + 18);
-
-  }, [snapshots, maxColumns, priceRows]);
+  }, [snapshots, maxColumns, priceRows, trades]);
 
   useEffect(() => {
     draw();
   }, [draw, canvasWidth]);
 
   // ---------------------------------------------------------------------------
-  // Tooltip ao passar o mouse
+  // Tooltip
   // ---------------------------------------------------------------------------
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas || snapshots.length === 0) return;
-
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-
-    const PRICE_AXIS_W = 60;
-    const TIME_AXIS_H = 22;
-    const plotW = canvas.width - PRICE_AXIS_W;
-    const plotH = canvas.height - TIME_AXIS_H;
+    const plotW = canvas.width - 60;
+    const plotH = canvas.height - 22;
 
     if (mx > plotW || my > plotH) { setTooltip(null); return; }
 
     const window = snapshots.slice(-maxColumns);
-    const numCols = window.length;
-    const colW = plotW / numCols;
-    const colIdx = Math.floor(mx / colW);
+    const colIdx = Math.floor((mx / plotW) * window.length);
     const snap = window[Math.min(colIdx, window.length - 1)];
 
-    // Determinar preço na posição y
-    let globalMin = Infinity, globalMax = -Infinity;
-    for (const s of window) {
-      for (const b of s.bids) { if (b.price < globalMin) globalMin = b.price; if (b.price > globalMax) globalMax = b.price; }
-      for (const a of s.asks) { if (a.price < globalMin) globalMin = a.price; if (a.price > globalMax) globalMax = a.price; }
-    }
+    // Lógica simplificada de preço para o tooltip
     const lastMid = window[window.length - 1].mid;
-    const priceRange = Math.max((globalMax - globalMin) * 1.5, 5); // Acompanha a lógica de zoom acima
-    const visMin = lastMid - priceRange / 2;
-    const visMax = lastMid + priceRange / 2;
-
+    const visMin = lastMid - 15 * 0.6; // Valor aproximado
+    const visMax = lastMid + 15 * 0.4;
     const price = visMax - (my / plotH) * (visMax - visMin);
-    const time = new Date(snap.timestamp * 1000).toLocaleTimeString('pt-BR');
 
-    // Encontrar nível mais próximo
-    const allLevels = [...snap.bids, ...snap.asks];
-    const closest = allLevels.reduce<BookLevel | null>((best, l) =>
-      !best || Math.abs(l.price - price) < Math.abs(best.price - price) ? l : best
-    , null);
-
-    if (closest) {
-      const side = snap.bids.some(b => b.price === closest.price) ? 'BID' : 'ASK';
-      setTooltip({
-        x: e.clientX - rect.left + 12,
-        y: e.clientY - rect.top - 10,
-        text: `${time} | ${side} @ $${closest.price.toFixed(2)} | ${closest.qty.toFixed(4)} XAU`,
-      });
-    } else {
-      setTooltip(null);
-    }
+    setTooltip({
+      x: e.clientX - rect.left + 15,
+      y: e.clientY - rect.top - 15,
+      text: `$${price.toFixed(2)} | Liquid: ${snap.mid.toFixed(2)}`,
+    });
   }, [snapshots, maxColumns]);
 
   return (
-    <div ref={containerRef} className="heatmap-wrapper">
-      <div className="heatmap-header">
-        <span className="heatmap-title">ORDER BOOK HEATMAP</span>
-        <span className="heatmap-meta">
-          {snapshots.length} snapshots · {maxColumns}s visíveis
-        </span>
-      </div>
-
+    <div ref={containerRef} className="heatmap-wrapper bookmap-theme">
       <div style={{ position: 'relative' }}>
         <canvas
           ref={canvasRef}
@@ -414,14 +348,10 @@ const OrderBookHeatmap: React.FC<Props> = ({
           height={height}
           onMouseMove={handleMouseMove}
           onMouseLeave={() => setTooltip(null)}
-          style={{ display: 'block', cursor: 'crosshair' }}
+          style={{ display: 'block', cursor: 'crosshair', borderRadius: '4px' }}
         />
-
         {tooltip && (
-          <div
-            className="heatmap-tooltip"
-            style={{ left: tooltip.x, top: tooltip.y }}
-          >
+          <div className="heatmap-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>
             {tooltip.text}
           </div>
         )}
@@ -429,5 +359,4 @@ const OrderBookHeatmap: React.FC<Props> = ({
     </div>
   );
 };
-
 export default OrderBookHeatmap;
